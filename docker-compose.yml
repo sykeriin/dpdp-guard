@@ -1,0 +1,21 @@
+# Local dev stack. For production: Indian region (AWS ap-south-1 / GCP asia-south1), managed Postgres, real secrets.
+services:
+  db:
+    image: postgres:16
+    environment: { POSTGRES_USER: guard, POSTGRES_PASSWORD: guard, POSTGRES_DB: dpdpguard }
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+  api:
+    build: { context: ., dockerfile: server/Dockerfile }
+    environment:
+      ADMIN_DATABASE_URL: postgresql://guard:guard@db/dpdpguard
+      DATABASE_URL: postgresql://guard_app:guard_app@db/dpdpguard
+      ADMIN_TOKEN: change-me
+      RUN_WORKERS: "1"
+    depends_on: [db]
+    ports: ["8000:8000"]
+  dashboard:
+    build: { context: ., dockerfile: dashboard/Dockerfile }
+    ports: ["3000:3000"]
+    depends_on: [api]
+volumes: { pgdata: {} }

@@ -1,0 +1,17 @@
+[project]
+name = "dpdp-guard"
+version = "0.1.0"
+description = "DPDP compliance layer for AI agents"
+requires-python = ">=3.11"
+dependencies = ["pyyaml", "httpx"]
+[project.optional-dependencies]
+llm = ["anthropic"]
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+[tool.setuptools.packages.find]
+include = ["dpdp_guard*"]
+[tool.setuptools.package-data]
+dpdp_guard = ["notices/*.yaml"]
+[tool.pytest.ini_options]
+testpaths = ["tests"]

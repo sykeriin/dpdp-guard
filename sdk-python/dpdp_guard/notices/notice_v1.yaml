@@ -1,0 +1,54 @@
+# DRAFT - requires review by a qualified privacy lawyer before production use. Not legal advice.
+version: "v1-draft"
+purposes:
+  order_updates:
+    en: "Order updates: use your name and phone number to send order and delivery messages."
+    hi: "ऑर्डर अपडेट: ऑर्डर और डिलीवरी के संदेश भेजने के लिए आपका नाम और फ़ोन नंबर।"
+    retention_days: 90
+  support:
+    en: "Support: use what you tell us to resolve your query."
+    hi: "सहायता: आपकी समस्या हल करने के लिए आपकी दी गई जानकारी।"
+    retention_days: 30
+  marketing:
+    en: "Marketing: send you offers and promotions."
+    hi: "मार्केटिंग: आपको ऑफ़र और प्रमोशन भेजना।"
+    retention_days: 365
+templates:
+  notice:
+    en: |
+      Hi! Before we continue, {business} would like to process some of your personal data.
+      {purpose_lines}
+      Reply with the numbers you agree to (e.g. "1 2"), or "none". Each purpose is separate and you can say no to any.
+      You can withdraw anytime by saying "stop" or "delete my data". Details: {privacy_url}
+    hi: |
+      नमस्ते! आगे बढ़ने से पहले {business} आपका कुछ व्यक्तिगत डेटा प्रोसेस करना चाहता है।
+      {purpose_lines}
+      जिन नंबरों पर आपकी सहमति है उन्हें भेजें (जैसे "1 2"), या "none"। हर उद्देश्य अलग है।
+      आप कभी भी "stop" या "मेरा डेटा हटाओ" लिखकर सहमति वापस ले सकते हैं। विवरण: {privacy_url}
+  consent_recorded:
+    en: "Thanks, recorded: {granted}. You can change this anytime."
+    hi: "धन्यवाद, दर्ज किया गया: {granted}। आप इसे कभी भी बदल सकते हैं।"
+  consent_declined:
+    en: "Understood. We will not process your data for those purposes."
+    hi: "ठीक है। हम उन उद्देश्यों के लिए आपका डेटा प्रोसेस नहीं करेंगे।"
+  erasure_ack:
+    en: "Your deletion request is received (ref {ref}). We will confirm once your data is erased."
+    hi: "आपका डेटा हटाने का अनुरोध मिल गया है (संदर्भ {ref})। हटाने के बाद हम पुष्टि करेंगे।"
+  access_ack:
+    en: "Your access request is received (ref {ref}). We will share a summary of your data."
+    hi: "आपका जानकारी का अनुरोध मिल गया है (संदर्भ {ref})। हम आपके डेटा का सार भेजेंगे।"
+  withdraw_ack:
+    en: "Consent withdrawn. We will stop processing and delete data for those purposes."
+    hi: "सहमति वापस ली गई। हम प्रोसेसिंग बंद करेंगे और उन उद्देश्यों का डेटा हटाएंगे।"
+  correction_ack:
+    en: "Your correction request is received (ref {ref}). Please tell us what should be changed."
+    hi: "आपका सुधार अनुरोध मिल गया है (संदर्भ {ref})। कृपया बताएं क्या बदलना है।"
+  grievance_ack:
+    en: "Your grievance is logged (ref {ref}). Our grievance officer will respond."
+    hi: "आपकी शिकायत दर्ज हो गई है (संदर्भ {ref})। हमारे शिकायत अधिकारी जवाब देंगे।"
+  parental_consent:
+    en: "This service needs a parent or guardian's consent for users under 18. Please ask them to message us from their number to continue."
+    hi: "18 वर्ष से कम उम्र के उपयोगकर्ताओं के लिए माता-पिता की सहमति ज़रूरी है। कृपया उनसे अपने नंबर से संदेश भेजने को कहें।"
+  breach_user:
+    en: "Important: {business} had a security incident that may involve your data ({what}). What we are doing: {action}. What you can do: {advice}. Contact: {contact}."
+    hi: "महत्वपूर्ण: {business} में एक सुरक्षा घटना हुई जिसमें आपका डेटा ({what}) शामिल हो सकता है। हम यह कर रहे हैं: {action}। आप यह करें: {advice}। संपर्क: {contact}।"
