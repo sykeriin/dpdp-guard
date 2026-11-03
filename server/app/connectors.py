@@ -80,4 +80,24 @@ def pinecone(tenant, principal, config, job):  # UNVERIFIED; metadata-filter del
     return {"deleted": -1, "detail": "pinecone filter delete (count unknown)"}
 
 
-REGISTRY = {"transcripts": transcripts, "sql": sql, "pgvector": sql, "webhook": webhook, "hubspot": hubspot, "zoho": zoho, "pinecone": pinecone}
+# connectors that receive the job scope and can honour a single purpose (webhook gets scope in its payload)
+PURPOSE_AWARE = {"webhook"}
+
+def gsheets(tenant, principal, config, job):  # UNVERIFIED against the live API; tested with a mocked HTTP layer only
+    """Delete rows whose <column> equals the principal hash. config: token (OAuth/service-account bearer), spreadsheet_id,
+    sheet_name, sheet_id (numeric gid), column (0-based index, default 0). Rows are deleted bottom-up so indexes stay valid."""
+    h = {"Authorization": f"Bearer {config['token']}"}
+    base = f"https://sheets.googleapis.com/v4/spreadsheets/{config['spreadsheet_id']}"
+    col = int(config.get("column", 0))
+    r = httpx.get(f"{base}/values/{config['sheet_name']}", headers=h, timeout=15)
+    r.raise_for_status()
+    rows = r.json().get("values", [])
+    hits = [i for i, row in enumerate(rows) if len(row) > col and row[col] == principal]
+    if not hits:
+        return {"deleted": 0, "detail": "gsheets no match"}
+    reqs = [{"deleteDimension": {"range": {"sheetId": int(config["sheet_id"]), "dimension": "ROWS", "startIndex": i, "endIndex": i + 1}}} for i in reversed(hits)]
+    httpx.post(f"{base}:batchUpdate", headers=h, json={"requests": reqs}, timeout=15).raise_for_status()
+    return {"deleted": len(hits), "detail": "gsheets deleteDimension"}
+
+
+REGISTRY = {"gsheets": gsheets, "transcripts": transcripts, "sql": sql, "pgvector": sql, "webhook": webhook, "hubspot": hubspot, "zoho": zoho, "pinecone": pinecone}

@@ -52,3 +52,28 @@ templates:
   breach_user:
     en: "Important: {business} had a security incident that may involve your data ({what}). What we are doing: {action}. What you can do: {advice}. Contact: {contact}."
     hi: "महत्वपूर्ण: {business} में एक सुरक्षा घटना हुई जिसमें आपका डेटा ({what}) शामिल हो सकता है। हम यह कर रहे हैं: {action}। आप यह करें: {advice}। संपर्क: {contact}।"
+  guardian_ask_number:
+    en: "This service needs a parent or guardian's consent for users under 18. Please send your parent/guardian's mobile number and we will ask them."
+    hi: "18 वर्ष से कम उम्र के उपयोगकर्ताओं के लिए माता-पिता/अभिभावक की सहमति ज़रूरी है। कृपया उनका मोबाइल नंबर भेजें, हम उनसे पूछेंगे।"
+  guardian_need_other:
+    en: "That number can't be your own. Please send your parent/guardian's mobile number."
+    hi: "यह नंबर आपका अपना नहीं हो सकता। कृपया माता-पिता/अभिभावक का मोबाइल नंबर भेजें।"
+  guardian_waiting:
+    en: "We've asked your parent/guardian. We can continue once they reply."
+    hi: "हमने आपके माता-पिता/अभिभावक से पूछा है। उनके जवाब के बाद हम आगे बढ़ सकते हैं।"
+  guardian_declined_minor:
+    en: "Your parent/guardian did not give consent, so we can't process your data."
+    hi: "आपके माता-पिता/अभिभावक ने सहमति नहीं दी, इसलिए हम आपका डेटा प्रोसेस नहीं कर सकते।"
+  guardian_invite:
+    en: |
+      Hello, {business} here. A young user (under 18) says you are their parent/guardian. We need your consent before we process their personal data.
+      {purpose_lines}
+      Reply with the numbers you agree to (e.g. "1 2"), or "none". Each purpose is separate. Details: {privacy_url}
+    hi: |
+      नमस्ते, {business} की ओर से। एक नाबालिग (18 से कम) उपयोगकर्ता ने आपको अपना माता-पिता/अभिभावक बताया है। उनका व्यक्तिगत डेटा प्रोसेस करने से पहले हमें आपकी सहमति चाहिए।
+      {purpose_lines}
+      जिन नंबरों पर आपकी सहमति है उन्हें भेजें (जैसे "1 2"), या "none"। हर उद्देश्य अलग है। विवरण: {privacy_url}
+  guardian_recorded:
+    en: "Thank you. Your decision is recorded: {granted}. You can withdraw it anytime by messaging us."
+    hi: "धन्यवाद। आपका निर्णय दर्ज हो गया: {granted}। आप कभी भी संदेश भेजकर इसे वापस ले सकते हैं।"
+

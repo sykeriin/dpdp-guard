@@ -5,5 +5,5 @@
 | Rule 6 | Masking, access control, logs + related data kept >= 1 year | `pii.mask`, transcripts store masked text only, `events` append-only + RLS, `access_log` |
 | Rule 7 | Notify users without delay; Board report within 72h | `breach.py`, `/v1/breaches*`, dashboard Breach kit (72h clock) |
 | Rule 8 + Third Schedule | Erase when purpose served | `pii_records.expires_at`, `workers.run_retention`, `run_erasure` |
-| Rules 10-12 | Verifiable parental consent <18 | `minors.py` detects + blocks, shows parental-consent notice. **Verification not built** |
+| Rules 10-12 | Verifiable parental consent <18 | `minors.py` detects; `guard.py` runs a guardian-consent flow (ask number -> invite -> per-purpose reply recorded against the child). **Self-asserted: no identity/relationship verification** |
 | Rule 14 | Access, correction, erasure, withdrawal, grievance | `intent.py`, `/v1/rights-requests`, `/v1/principals/{id}/export`, erasure jobs with proof events |

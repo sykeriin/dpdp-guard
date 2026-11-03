@@ -24,8 +24,7 @@ class DbStore:
 
     def record_consent(self, tenant, principal, purpose, granted, channel, notice_version):
         with db.tenant_cur(self.t) as cur:
-            cur.execute("insert into consents(tenant_id,principal,purpose,granted,channel,notice_version) values(%s,%s,%s,%s,%s,%s)", (self.t, principal, purpose, granted, channel, notice_version))
-            ledger.append(cur, self.t, "consent_granted" if granted else "consent_declined", principal, {"purpose": purpose, "channel": channel, "notice_version": notice_version})
+            workers.record_consent(cur, self.t, principal, purpose, granted, channel, notice_version)
 
     def consent_state(self, tenant, principal):
         with db.tenant_cur(self.t) as cur:

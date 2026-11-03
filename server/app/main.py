@@ -5,7 +5,9 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, FastAPI, HTTPException, Response
+import time
+from collections import defaultdict, deque
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -53,9 +55,16 @@ class BreachIn(BaseModel):
 class BreachNoticeIn(BaseModel):
     business: str; what: str; action: str; advice: str; contact: str; lang: str = "en"
 class GuardIn(BaseModel):
+    """Per-call fields override the tenant config saved via PUT /v1/config."""
     message: str; user_id: str; channel: str = "web"
-    business: str = "Your Business"; required_purposes: list[str] = ["order_updates"]; optional_purposes: list[str] = []
-    privacy_url: str = "https://example.com/privacy"
+    business: str | None = None; required_purposes: list[str] | None = None; optional_purposes: list[str] | None = None
+    privacy_url: str | None = None
+class PurposeIn(BaseModel):
+    en: str; hi: str | None = None; retention_days: int = 90
+class ConfigIn(BaseModel):
+    business: str = "Your Business"; privacy_url: str = "https://example.com/privacy"
+    required_purposes: list[str] = ["order_updates"]; optional_purposes: list[str] = []
+    purposes: dict[str, PurposeIn] = {}          # custom purposes; built-ins (order_updates, support, marketing) need no definition
 class CheckIn(BaseModel):
     text: str
 class TenantIn(BaseModel):
@@ -92,8 +101,7 @@ def set_state(b: StateIn, t=T):
 @app.post("/v1/consents")
 def post_consent(b: ConsentIn, t=T):
     with db.tenant_cur(t) as cur:
-        cur.execute("insert into consents(tenant_id,principal,purpose,granted,channel,notice_version) values(%s,%s,%s,%s,%s,%s)", (t, b.principal, b.purpose, b.granted, b.channel, b.notice_version))
-        ledger.append(cur, t, "consent_granted" if b.granted else "consent_declined", b.principal, {"purpose": b.purpose, "channel": b.channel, "notice_version": b.notice_version})
+        workers.record_consent(cur, t, b.principal, b.purpose, b.granted, b.channel, b.notice_version)
     return {"ok": True}
 
 
@@ -180,6 +188,41 @@ def add_connector(b: ConnectorIn, t=T):
         return {"id": cur.fetchone()["id"]}
 
 
+@app.get("/v1/connectors")
+def list_connectors(t=T):
+    """Config values (tokens, DSNs, secrets) are never returned; only which keys are set."""
+    with db.tenant_cur(t) as cur:
+        cur.execute("select id, kind, name, config from connectors where tenant_id=%s order by id", (t,))
+        return [{"id": r["id"], "kind": r["kind"], "name": r["name"], "config_keys": sorted((r["config"] or {}).keys())} for r in cur.fetchall()]
+
+
+@app.delete("/v1/connectors/{cid}")
+def delete_connector(cid: int, t=T):
+    with db.tenant_cur(t) as cur:
+        cur.execute("delete from connectors where tenant_id=%s and id=%s", (t, cid))
+        if cur.rowcount != 1: raise HTTPException(404)
+        ledger.append(cur, t, "connector_removed", None, {"id": cid})
+    return {"ok": True}
+
+
+@app.get("/v1/principals/lookup")
+def lookup_principal(user_id: str, t=T):
+    """Operators know phone numbers, the ledger only has hashes. Computes the hash server-side; user_id is not stored."""
+    from dpdp_guard import Guard
+    from dpdp_guard.chain import hash_principal
+    with db.tenant_cur(t) as cur:
+        ledger.log_access(cur, t, "dashboard", "lookup", "principal")
+    return {"principal": hash_principal(t, Guard._norm(user_id), "")}
+
+
+@app.get("/v1/notices")
+def active_notices(t=T):
+    from dpdp_guard import notices
+    cfg = notices.load(); c = _tenant_config(t)
+    purposes = {**cfg["purposes"], **{k: {"en": v["en"], "hi": v.get("hi") or v["en"], "retention_days": v.get("retention_days", 90)} for k, v in (c.get("purposes") or {}).items()}}
+    return {"version": cfg["version"], "status": "DRAFT - lawyer review required", "purposes": purposes, "templates": cfg["templates"]}
+
+
 @app.get("/v1/erasure")
 def list_erasure(t=T):
     with db.tenant_cur(t) as cur:
@@ -251,19 +294,69 @@ def audit_pack(business: str = "Your Business", t=T):
     return Response(audit.build(t, business), media_type="application/zip", headers={"Content-Disposition": "attachment; filename=audit-pack.zip"})
 
 
+_hits: dict[str, deque] = defaultdict(deque)
+
+
+def _rate_limit(ip: str, limit: int, window: float = 60.0):
+    """Sliding window per client IP. In-memory: single process only, resets on restart."""
+    now_, q = time.monotonic(), _hits[ip]
+    while q and now_ - q[0] > window:
+        q.popleft()
+    if len(q) >= limit:
+        raise HTTPException(429, "rate limit exceeded", headers={"Retry-After": str(int(window))})
+    q.append(now_)
+
+
 @app.post("/v1/checker")
-def run_checker(b: CheckIn):
-    """Public, unauthenticated, nothing stored."""
+def run_checker(b: CheckIn, request: Request):
+    """Public, unauthenticated, nothing stored. Rate limited per IP (CHECKER_RATE_PER_MIN, default 20)."""
+    _rate_limit(request.client.host if request.client else "?", int(os.environ.get("CHECKER_RATE_PER_MIN", "20")))
     if len(b.text) > 50_000: raise HTTPException(413, "too long")
     return checker.check(b.text)
 
 
+def _tenant_config(t) -> dict:
+    with db.raw_cur() as cur:
+        cur.execute("select config from tenants where id=%s", (t,)); r = cur.fetchone()
+    return (r or {}).get("config") or {}
+
+
+@app.get("/v1/config")
+def get_config(t=T): return _tenant_config(t)
+
+
+@app.put("/v1/config")
+def put_config(b: ConfigIn, t=T):
+    import re
+    known = set(b.purposes) | {"order_updates", "support", "marketing"}
+    bad = [p for p in b.required_purposes + b.optional_purposes if p not in known]
+    if bad: raise HTTPException(422, f"undefined purposes: {bad}; define them under 'purposes'")
+    if not b.required_purposes: raise HTTPException(422, "at least one required purpose")
+    if any(not re.fullmatch(r"[a-z][a-z0-9_]{1,40}", p) for p in b.purposes): raise HTTPException(422, "purpose ids must be snake_case")
+    with db.raw_cur() as cur:
+        cur.execute("update tenants set config=%s where id=%s", (b.model_dump_json(), t))
+        if cur.rowcount != 1: raise HTTPException(404)
+    with db.tenant_cur(t) as cur:
+        ledger.append(cur, t, "config_changed", None, {"required": b.required_purposes, "optional": b.optional_purposes, "custom_purposes": sorted(b.purposes)})
+    return {"ok": True}
+
+
 @app.post("/v1/guard")
 def guard_endpoint(b: GuardIn, t=T):
-    """Hosted guard(): for non-Python stacks (Node SDK, n8n). Stateless config per call; state lives in the ledger DB."""
-    from dpdp_guard import Guard
+    """Hosted guard(): for non-Python stacks (Node SDK, n8n). Config = saved tenant config, overridden per call."""
+    import copy
+    from dpdp_guard import Guard, notices
     from .dbstore import DbStore
-    g = Guard(t, b.business, b.required_purposes, b.optional_purposes, store=DbStore(t), privacy_url=b.privacy_url)
+    c = _tenant_config(t)
+    cfg = copy.deepcopy(notices.load())
+    for pid, d in (c.get("purposes") or {}).items():
+        cfg["purposes"][pid] = {"en": d["en"], "hi": d.get("hi") or d["en"], "retention_days": d.get("retention_days", 90)}
+    req = b.required_purposes or c.get("required_purposes") or ["order_updates"]
+    opt = b.optional_purposes if b.optional_purposes is not None else c.get("optional_purposes") or []
+    unknown = [p for p in req + opt if p not in cfg["purposes"]]
+    if unknown: raise HTTPException(422, f"undefined purposes: {unknown}")
+    g = Guard(t, b.business or c.get("business") or "Your Business", req, opt, store=DbStore(t),
+              privacy_url=b.privacy_url or c.get("privacy_url") or "https://example.com/privacy", notice_cfg=cfg)
     r = g(b.message, b.user_id, b.channel)
     return {"action": r.action, "message": r.message, "masked_message": r.masked_message, "reply_text": r.reply_text,
-            "intent": r.intent, "granted": r.granted, "rights_ref": r.rights_ref, "principal": g.pid(b.user_id)}
+            "intent": r.intent, "granted": r.granted, "rights_ref": r.rights_ref, "notify": r.notify, "principal": g.pid(b.user_id)}

@@ -1,4 +1,5 @@
 create table if not exists tenants(id text primary key, name text not null, created_at timestamptz default now());
+alter table tenants add column if not exists config jsonb not null default '{}';
 create table if not exists api_keys(key_hash text primary key, tenant_id text not null references tenants(id), label text, created_at timestamptz default now());
 
 create table if not exists events(
@@ -21,6 +22,7 @@ create table if not exists rights_requests(ref text primary key, tenant_id text 
 create table if not exists erasure_jobs(id bigserial primary key, tenant_id text not null, principal text not null, reason text,
   rights_ref text, status text not null default 'queued', attempts int default 0, run_after timestamptz default now(),
   created_at timestamptz default now(), finished_at timestamptz, results jsonb default '[]');
+alter table erasure_jobs add column if not exists scope text not null default 'all';
 create table if not exists connectors(id bigserial primary key, tenant_id text not null, kind text not null, name text, config jsonb default '{}');
 create table if not exists breaches(id bigserial primary key, tenant_id text not null, title text, description text,
   detected_at timestamptz not null default now(), affected_principals text[] default '{}', data_kinds text[] default '{}',

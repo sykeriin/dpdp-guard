@@ -148,6 +148,137 @@ def test_hosted_guard_endpoint_and_transcript_masking(tenant):
     assert "9876543210" not in texts and "[PHONE:" in texts           # raw PII never reached the stored transcript
     c.post("/v1/guard", json=body("meri details hatao"))
     ref = c.get("/v1/rights-requests").json()[0]["ref"]
-    c.post(f"/v1/rights-requests/{ref}/execute"); assert c.post("/v1/workers/run").json()["erasure_done"] == 1
+    c.post(f"/v1/rights-requests/{ref}/execute")
+    # the erasure message also withdrew consent per purpose, which queues a (redundant, narrower) purpose-scoped job
+    assert c.post("/v1/workers/run").json()["erasure_done"] >= 1
+    assert {j["status"] for j in c.get("/v1/erasure").json()} == {"done"}
     with db.tenant_cur(tid) as cur:
         cur.execute("select count(*) n from transcripts where principal=%s", (r["principal"],)); assert cur.fetchone()["n"] == 0
+
+
+def test_withdrawing_marketing_erases_only_marketing_pii(tenant):
+    tid, c = tenant
+    p = "pp1"
+    c.post("/v1/consents", json={"principal": p, "purpose": "order_updates", "granted": True})
+    c.post("/v1/consents", json={"principal": p, "purpose": "marketing", "granted": True})
+    c.post("/v1/pii", json={"principal": p, "kind": "phone", "purpose": "order_updates", "masked": "x", "retention_days": 90})
+    c.post("/v1/pii", json={"principal": p, "kind": "email", "purpose": "marketing", "masked": "y", "retention_days": 90})
+    c.post("/v1/transcripts", json={"principal": p, "role": "user", "text": "hi"})
+    c.post("/v1/consents", json={"principal": p, "purpose": "marketing", "granted": False})     # withdraw
+    job = c.get("/v1/erasure").json()[0]
+    assert job["scope"] == "purpose:marketing"
+    assert c.post("/v1/workers/run").json()["erasure_done"] == 1
+    with db.tenant_cur(tid) as cur:
+        cur.execute("select purpose, erased_at is not null as gone from pii_records where principal=%s", (p,))
+        gone = {r["purpose"]: r["gone"] for r in cur.fetchall()}
+        cur.execute("select count(*) n from transcripts where principal=%s", (p,)); transcripts = cur.fetchone()["n"]
+    assert gone == {"order_updates": False, "marketing": True}      # order-update data untouched
+    assert transcripts == 1                                         # transcripts not wiped by a single-purpose withdrawal
+
+
+def test_declining_never_granted_purpose_queues_nothing(tenant):
+    tid, c = tenant
+    c.post("/v1/consents", json={"principal": "q", "purpose": "marketing", "granted": False})
+    assert c.get("/v1/erasure").json() == []
+
+
+def test_purpose_scoped_job_keeps_scope_after_failed_retry(tenant):
+    """Regression: scope used to live in results[0] and was lost when a failed attempt overwrote results -> over-deletion."""
+    tid, c = tenant
+    import psycopg
+    pid = "pscope"
+    with psycopg.connect(db.ADMIN_URL, autocommit=True) as conn:
+        conn.execute("create table if not exists cust_vectors(id serial, principal text, body text)")
+        conn.execute("delete from cust_vectors where principal=%s", (pid,))     # table persists across runs
+        conn.execute("insert into cust_vectors(principal, body) values (%s,'keep me')", (pid,))
+    c.post("/v1/connectors", json={"kind": "pgvector", "config": {"dsn": db.ADMIN_URL, "table": "cust_vectors"}})
+    c.post("/v1/connectors", json={"kind": "webhook", "config": {"url": "http://127.0.0.1:1/x", "secret": "s"}})   # fails -> job requeued
+    c.post("/v1/consents", json={"principal": pid, "purpose": "marketing", "granted": True})
+    c.post("/v1/consents", json={"principal": pid, "purpose": "marketing", "granted": False})
+    for _ in range(2):
+        c.post("/v1/workers/run")
+    job = c.get("/v1/erasure").json()[0]
+    assert job["scope"] == "purpose:marketing" and job["attempts"] >= 1
+    with psycopg.connect(db.ADMIN_URL) as conn:       # the principal-wide SQL connector must NOT have run
+        assert conn.execute("select count(*) from cust_vectors where principal=%s", (pid,)).fetchone()[0] == 1
+
+
+def test_checker_rate_limited(tenant, monkeypatch):
+    _, c = tenant
+    monkeypatch.setenv("CHECKER_RATE_PER_MIN", "3")
+    from app import main
+    main._hits.clear()
+    codes = [c.post("/v1/checker", json={"text": "hi"}).status_code for _ in range(5)]
+    assert codes == [200, 200, 200, 429, 429]
+    main._hits.clear()
+
+
+def test_gsheets_connector_deletes_matching_rows_bottom_up(tenant, monkeypatch):
+    import httpx
+    from app import connectors
+    calls = []
+    def fake_get(url, headers=None, timeout=None):
+        calls.append(("GET", url))
+        return httpx.Response(200, json={"values": [["hdr"], ["P1", "a"], ["other", "b"], ["P1", "c"]]}, request=httpx.Request("GET", url))
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(("POST", url, json))
+        return httpx.Response(200, json={}, request=httpx.Request("POST", url))
+    monkeypatch.setattr(httpx, "get", fake_get); monkeypatch.setattr(httpx, "post", fake_post)
+    res = connectors.gsheets("t", "P1", {"token": "tok", "spreadsheet_id": "S", "sheet_name": "Leads", "sheet_id": 7}, {})
+    assert res["deleted"] == 2
+    reqs = calls[1][2]["requests"]
+    assert [r["deleteDimension"]["range"]["startIndex"] for r in reqs] == [3, 1]      # bottom-up
+    assert all(r["deleteDimension"]["range"]["sheetId"] == 7 for r in reqs)
+    calls.clear()
+    assert connectors.gsheets("t", "nobody", {"token": "t", "spreadsheet_id": "S", "sheet_name": "Leads", "sheet_id": 7}, {})["deleted"] == 0
+    assert len(calls) == 1                                                             # no batchUpdate when nothing matches
+
+
+def test_tenant_config_custom_purposes_drive_guard(tenant):
+    tid, c = tenant
+    r = c.put("/v1/config", json={"business": "Dr Rao Clinic", "required_purposes": ["appointments"], "optional_purposes": ["health_tips"],
+                                  "purposes": {"appointments": {"en": "Appointments: book and remind you of visits.", "retention_days": 30},
+                                               "health_tips": {"en": "Health tips: send wellness advice.", "retention_days": 365}}})
+    assert r.status_code == 200
+    n = c.post("/v1/guard", json={"message": "hi", "user_id": "u1"}).json()["reply_text"]
+    assert "Dr Rao Clinic" in n and "Appointments: book" in n and "Health tips" in n and "Marketing" not in n
+    assert c.post("/v1/guard", json={"message": "1", "user_id": "u1"}).json()["granted"] == ["appointments"]
+    c.post("/v1/guard", json={"message": "my number 9876543210", "user_id": "u1"})
+    with db.tenant_cur(tid) as cur:
+        cur.execute("select purpose, (expires_at < now() + interval '31 days') as short from pii_records"); row = cur.fetchone()
+        cur.execute("select count(*) n from events where type='config_changed'"); logged = cur.fetchone()["n"]
+    assert row["purpose"] == "appointments" and row["short"]      # custom 30-day retention applied
+    assert logged == 1
+
+
+def test_tenant_config_validation_and_isolation(tenant):
+    tid, c = tenant
+    assert c.put("/v1/config", json={"required_purposes": ["nope"]}).status_code == 422
+    assert c.put("/v1/config", json={"required_purposes": []}).status_code == 422
+    assert c.put("/v1/config", json={"required_purposes": ["Bad-Id"], "purposes": {"Bad-Id": {"en": "x"}}}).status_code == 422
+    other = c.__class__(c.app); k = other.post("/admin/tenants", json={"id": tid + "_b", "name": "B"}, headers={"X-Admin-Token": "adm"}).json()["api_key"]
+    other.headers["Authorization"] = f"Bearer {k}"
+    c.put("/v1/config", json={"business": "A Corp"})
+    assert other.get("/v1/config").json() == {}                   # another tenant doesn't see it
+
+
+def test_connector_listing_redacts_secrets_and_delete(tenant):
+    tid, c = tenant
+    cid = c.post("/v1/connectors", json={"kind": "webhook", "name": "crm", "config": {"url": "http://x", "secret": "TOPSECRET"}}).json()["id"]
+    rows = c.get("/v1/connectors").json()
+    assert rows == [{"id": cid, "kind": "webhook", "name": "crm", "config_keys": ["secret", "url"]}] and "TOPSECRET" not in str(rows)
+    assert c.delete(f"/v1/connectors/{cid}").status_code == 200 and c.get("/v1/connectors").json() == []
+    assert c.delete(f"/v1/connectors/{cid}").status_code == 404
+
+def test_principal_lookup_matches_guard_and_is_logged(tenant):
+    tid, c = tenant
+    r = c.post("/v1/guard", json={"message": "hi", "user_id": "919876543210"}).json()
+    assert c.get("/v1/principals/lookup", params={"user_id": "+91 98765 43210"}).json()["principal"] == r["principal"]
+    with db.tenant_cur(tid) as cur:
+        cur.execute("select count(*) n from access_log where action='lookup'"); assert cur.fetchone()["n"] == 1
+
+def test_notices_endpoint_includes_custom_purposes(tenant):
+    _, c = tenant
+    c.put("/v1/config", json={"required_purposes": ["appointments"], "purposes": {"appointments": {"en": "Appts", "retention_days": 30}}})
+    n = c.get("/v1/notices").json()
+    assert "appointments" in n["purposes"] and "marketing" in n["purposes"] and "DRAFT" in n["status"]

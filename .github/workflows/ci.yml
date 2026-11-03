@@ -1,0 +1,32 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: guard, POSTGRES_PASSWORD: guard, POSTGRES_DB: dpdpguard }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U guard" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      ADMIN_TOKEN: adm
+      ADMIN_DATABASE_URL: postgresql://guard:guard@localhost/dpdpguard
+      DATABASE_URL: postgresql://guard_app:guard_app@localhost/dpdpguard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.13" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Install
+        run: |
+          python -m venv .venv && . .venv/bin/activate
+          pip install -e sdk-python fastapi uvicorn "psycopg[binary]" psycopg_pool reportlab httpx pyyaml pytest
+          (cd dashboard && npm ci --no-audit --no-fund)
+          npm i -g playwright && npx playwright install --with-deps chromium
+      - name: Postgres client for the test runner
+        run: sudo apt-get install -y postgresql-client >/dev/null
+      - name: Full suite
+        run: ./scripts/test_all.sh

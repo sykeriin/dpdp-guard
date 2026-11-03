@@ -21,6 +21,11 @@ def render(name: str, lang: str = "en", cfg: dict | None = None, **kw) -> str:
     return s.format(**kw).strip()
 
 
+def purpose_lines(purposes: list[str], lang: str = "en", cfg: dict | None = None) -> str:
+    cfg = cfg or load()
+    return "\n".join(f"{i}. {cfg['purposes'][p].get(lang) or cfg['purposes'][p]['en']}" for i, p in enumerate(purposes, 1))
+
+
 def notice(purposes: list[str], business: str, privacy_url: str, lang: str = "en", cfg: dict | None = None) -> str:
     cfg = cfg or load()
     lines = "\n".join(f"{i}. {cfg['purposes'][p].get(lang) or cfg['purposes'][p]['en']}" for i, p in enumerate(purposes, 1))

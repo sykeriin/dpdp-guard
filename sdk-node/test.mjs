@@ -9,4 +9,7 @@ assert.deepEqual((await g.guard("1", "u1")).granted, ["order_updates"]);
 const r = await g.guard("my number is 9876543210", "u1");
 assert.equal(r.action, "forward"); assert.ok(!r.maskedMessage.includes("9876543210")); assert.ok(r.message.includes("9876543210"));
 assert.equal((await g.guard("meri details hatao", "u1")).intent, "erasure");
+assert.ok(Array.isArray(r.notify));
+const kid = await g.guard("I am 14 years old", "kid"); assert.equal(kid.action, "block");
+const inv = await g.guard("my mom is 98765 11111", "kid"); assert.equal(inv.notify.length, 1); assert.equal(inv.notify[0].to, "9876511111");
 console.log("node sdk ok");

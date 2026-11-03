@@ -16,6 +16,9 @@ services:
     ports: ["8000:8000"]
   dashboard:
     build: { context: ., dockerfile: dashboard/Dockerfile }
+    environment:
+      GUARD_API_URL: http://api:8000
+      INSECURE_COOKIES: "1"   # local http only; remove behind HTTPS
     ports: ["3000:3000"]
     depends_on: [api]
 volumes: { pgdata: {} }

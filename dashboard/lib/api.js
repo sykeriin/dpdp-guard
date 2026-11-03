@@ -1,16 +1,18 @@
 "use client";
 import { useEffect, useState } from "react";
-export const BASE = process.env.NEXT_PUBLIC_GUARD_URL || "http://localhost:8000";
-export const getKey = () => (typeof window === "undefined" ? "" : localStorage.getItem("dg_key") || "");
+export const BASE = "/api/guard";   // same-origin proxy; the API key lives in an httpOnly cookie and never reaches this code
 export async function api(path, opts = {}) {
-  const r = await fetch(BASE + path, { ...opts, headers: { "Content-Type": "application/json", Authorization: "Bearer " + getKey(), ...(opts.headers || {}) } });
-  if (!r.ok) throw new Error(r.status === 401 ? "Invalid or missing API key" : `${r.status} ${await r.text()}`);
+  const r = await fetch(BASE + path, { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers || {}) } });
+  if (!r.ok) {
+    if (r.status === 401) throw new Error("Not logged in. Go to Overview and enter your API key.");
+    throw new Error(`${r.status} ${await r.text()}`);
+  }
   const ct = r.headers.get("content-type") || "";
   return ct.includes("json") ? r.json() : r;
 }
 export function useApi(path, deps = []) {
   const [data, setData] = useState(null); const [err, setErr] = useState(null);
-  const reload = () => !getKey() ? setErr("Enter your API key on the Overview page") : api(path).then(setData).catch((e) => setErr(e.message));
+  const reload = () => api(path).then((d) => { setData(d); setErr(null); }).catch((e) => setErr(e.message));
   useEffect(() => { reload(); }, deps); // eslint-disable-line
   return { data, err, reload };
 }
