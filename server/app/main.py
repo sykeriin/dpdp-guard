@@ -359,4 +359,4 @@ def guard_endpoint(b: GuardIn, t=T):
               privacy_url=b.privacy_url or c.get("privacy_url") or "https://example.com/privacy", notice_cfg=cfg)
     r = g(b.message, b.user_id, b.channel)
     return {"action": r.action, "message": r.message, "masked_message": r.masked_message, "reply_text": r.reply_text,
-            "intent": r.intent, "granted": r.granted, "rights_ref": r.rights_ref, "notify": r.notify, "principal": g.pid(b.user_id)}
+            "intent": r.intent, "granted": r.granted, "rights_ref": r.rights_ref, "review_ref": r.review_ref, "notify": r.notify, "principal": g.pid(b.user_id)}

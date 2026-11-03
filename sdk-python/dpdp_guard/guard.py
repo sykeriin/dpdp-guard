@@ -15,6 +15,10 @@ from .chain import hash_principal
 from .store import LocalStore
 
 _YES = re.compile(r"(?i)^\s*(y|yes|yep|ok|okay|haan|han|ha|hanji|ji|sure|agree|i agree|हाँ|हां|जी)\s*[.!]*\s*$")
+# Messages that look privacy-related but matched no rights intent: queued for a human instead of silently passing.
+# Deliberately broad (some benign hits, e.g. "data plans"); a missed erasure request is worse than a skimmed ticket.
+_REVIEW = re.compile(r"(?i)\b(?:data|personal (?:info|information|details)|privacy|consent|permission|gdpr|dpdp|delete|erase|erasure|forget me|unsubscribe|opt[- ]?out|"
+                     r"stored|saved|records?|hatao|hata|mita|jaankari|sahmati)\b|डेटा|जानकारी|सहमति|गोपनीयता|हटा|मिटा")
 _NO = re.compile(r"(?i)^\s*(n|no|nope|none|nahi|nahin|na|decline|disagree|नहीं|नही)\s*[.!]*\s*$")
 
 
@@ -29,6 +33,7 @@ class GuardResult:
     granted: list = field(default_factory=list)
     rights_ref: str | None = None
     notify: list = field(default_factory=list)   # [{'to': <raw id>, 'text': ...}] extra messages YOU must deliver (e.g. guardian invite)
+    review_ref: str | None = None    # privacy-looking message with no recognised intent: a 'review' ticket was opened for a human
     error: str | None = None         # set when the guard failed (fail_mode decides forward vs block)
 
 
@@ -104,6 +109,8 @@ class Guard:
     def process(self, message: str, user_id: str, channel: str = "web") -> GuardResult:
         try:
             res = self._process(message, user_id, channel)
+            if res.intent is None and _REVIEW.search(message):
+                res.review_ref = self.store.create_rights_request(self.tenant, self._pid(user_id), "review", res.masked_message)
             if self.log_transcripts and hasattr(self.store, "log_transcript"):
                 pid = self._pid(user_id)
                 self.store.log_transcript(self.tenant, pid, "user", res.masked_message)   # masked only: raw PII never reaches logs

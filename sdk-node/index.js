@@ -12,6 +12,6 @@ export class Guard {
     });
     if (!r.ok) throw new Error(`guard failed: ${r.status} ${await r.text()}`);
     const j = await r.json();
-    return { action: j.action, message: j.message, maskedMessage: j.masked_message, replyText: j.reply_text, intent: j.intent, granted: j.granted, rightsRef: j.rights_ref, notify: j.notify || [], principal: j.principal };
+    return { action: j.action, message: j.message, maskedMessage: j.masked_message, replyText: j.reply_text, intent: j.intent, granted: j.granted, rightsRef: j.rights_ref, reviewRef: j.review_ref || null, notify: j.notify || [], principal: j.principal };
   }
 }

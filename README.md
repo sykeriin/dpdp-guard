@@ -39,7 +39,7 @@ One command runs everything (real Postgres, live API, built dashboard, headless 
 ./scripts/setup_db.sh        # once, as a Postgres superuser (dev credentials)
 ./scripts/test_all.sh
 ```
-Individual suites: `cd sdk-python && python -m pytest` (26) | `cd server && PYTHONPATH=. python -m pytest tests` (24) | `PYTHONPATH=sdk-python python -m pytest examples/tests` (5) | `cd sdk-node && node test.mjs` | `python examples/e2e_demo.py` | `node scripts/dashboard_e2e.js`.
+Individual suites: `cd sdk-python && python -m pytest` (32) | `cd server && PYTHONPATH=. python -m pytest tests` (24) | `PYTHONPATH=sdk-python python -m pytest examples/tests` (5) | `cd sdk-node && node test.mjs` | `python examples/e2e_demo.py` | `node scripts/dashboard_e2e.js`.
 
 ## Configuration
 | Variable | Where | Purpose |
@@ -57,7 +57,7 @@ Per-tenant purposes, retention and business name: `PUT /v1/config` (see `server/
 ## Status: what is and isn't verified
 **Verified by `scripts/test_all.sh`:** per-purpose consent (a bare "yes" is rejected), PII masking, hash-chain + tamper detection (including owner-level edits), RLS tenant isolation as a non-superuser role, erasure via built-in transcripts + SQL connector + signed webhook, purpose-scoped erasure (withdrawing marketing leaves order-update data alone, including after a failed retry), retention expiry, fail-closed guard when the ledger is down, WhatsApp webhook signature check and duplicate-delivery handling, guardian-consent flow, breach kit, audit-pack ZIP, tenant-configurable purposes, the dashboard in a real browser (httpOnly cookie session; key never reachable from page JS; connectors, lookup, notices, checker, audit download), Node SDK.
 
-**Intent classifier: measure, don't trust.** Rules-only accuracy on phrasings written after the rules was **73.9%** (0 false positives, 69 cases); the first fresh set scored **58.9%** before I tuned on it. Details and caveats in `docs/intent-eval.md`. Every miss means a rights request goes unrecognised. The LLM fallback (`use_llm=True`) is implemented but **has never been run**.
+**Intent classifier: measure, don't trust.** Rules-only accuracy on phrasings written after the rules was **73.9%** (0 false positives, 69 cases); the first fresh set scored **58.9%** before I tuned on it. Details and caveats in `docs/intent-eval.md`. Misses open a human-review ticket when the message mentions data/deletion/consent (catches 11 of 18; 7 of 41 rights requests still pass silently). The LLM fallback (`use_llm=True`) is implemented and its wiring is unit-tested with a fake client, but it **has never been run against a real model**, so its accuracy is unknown.
 
 **Not verified / not built**
 - HubSpot, Zoho, Pinecone and Google Sheets connectors are written from API docs and tested only against mocked HTTP (Sheets) or not at all. The `pgvector` connector is a plain `DELETE ... WHERE principal=`, tested on an ordinary table. Only the webhook connector honours single-purpose scope; the others are skipped for purpose-scoped jobs rather than over-deleting.

@@ -134,3 +134,47 @@ def test_unclear_guardian_reply_reasks_without_consent(g):
 def test_phone_id_normalisation():
     gd = Guard("t", "A", ["x"], store=LocalStore())
     assert gd.pid("+91 98765 43210") == gd.pid("919876543210") == gd.pid("9876543210") != gd.pid("9876543211")
+
+
+# ---- review queue + LLM fallback plumbing (a fake client: tests wiring, NOT model accuracy)
+def test_unrecognised_privacy_message_opens_review_ticket_and_still_flows(g):
+    g("hi", "u1"); g("1", "u1")
+    r = g("could you purge whatever you've stored on me", "u1")      # known rules miss
+    assert r.intent is None and r.review_ref and r.action == "forward"
+    assert [x["kind"] for x in g.store.rights("t1")] == ["review"]
+    assert g("where is my order", "u1").review_ref is None            # ordinary message: no ticket
+
+def test_review_ticket_never_contains_raw_pii(g):
+    g("hi", "u1"); g("1", "u1")
+    g("my data is 9876543210, sort it out somehow", "u1")
+    assert "9876543210" not in g.store.rights("t1")[0]["detail"]
+
+class _FakeLLM:
+    def __init__(self, text): self.text, self.calls = text, 0
+    @property
+    def messages(self): return self
+    def create(self, **kw):
+        self.calls += 1
+        class R: pass
+        r = R(); r.content = [type("C", (), {"text": self.text})()]; return r
+
+def test_llm_fallback_used_only_when_rules_miss():
+    from dpdp_guard import intent
+    llm = _FakeLLM("erasure")
+    assert intent.classify("could you purge whatever you've stored on me", use_llm=True, client=llm) == "erasure" and llm.calls == 1
+    assert intent.classify("delete my data", use_llm=True, client=llm) == "erasure" and llm.calls == 1   # rules hit: no LLM call
+    assert intent.classify("where is my order", use_llm=False, client=llm) is None and llm.calls == 1
+
+def test_llm_garbage_or_error_means_no_intent():
+    from dpdp_guard import intent
+    assert intent.classify("odd text here", use_llm=True, client=_FakeLLM("Sure! I think it is erasure.")) is None
+    class Boom:
+        messages = property(lambda s: s)
+        def create(self, **k): raise RuntimeError("api down")
+    assert intent.classify("odd text here", use_llm=True, client=Boom()) is None
+
+def test_guard_with_llm_catches_rules_miss_and_queues_erasure():
+    g = Guard("t1", "Acme", ["order_updates"], store=LocalStore(), use_llm=True, llm_client=_FakeLLM("erasure"))
+    g("hi", "u1"); g("1", "u1")
+    r = g("could you purge whatever you've stored on me", "u1")
+    assert r.intent == "erasure" and r.action == "reply" and r.review_ref is None
