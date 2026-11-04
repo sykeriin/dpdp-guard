@@ -66,25 +66,22 @@ def mask(text: str, fields: list[PIIField] | None = None) -> str:
 
 
 def llm_names(text: str, client=None, model: str = "claude-haiku-5-5") -> list[PIIField]:
-    """Optional LLM pass for names/addresses. Returns [] if no client/anthropic installed."""
-    if client is None:
-        try:
-            import anthropic
-            client = anthropic.Anthropic()
-        except Exception:
-            return []
+    """Optional LLM pass for names/addresses. Returns [] if no client/anthropic installed or the call fails."""
+    from ._llm import call_text, make_client
     import json
+    client = client or make_client()
+    if client is None:
+        return []
     try:
-        r = client.messages.create(
-            model=model, max_tokens=300,
-            system='Extract personal names and postal addresses from the user text. Reply ONLY JSON: [{"kind":"name"|"address","value":"<exact substring>"}]. Empty list if none.',
-            messages=[{"role": "user", "content": text}])
-        items = json.loads(r.content[0].text)
+        out = call_text(client, 'Extract personal names and postal addresses from the user text. Reply ONLY JSON: [{"kind":"name"|"address","value":"<exact substring>"}]. Empty list if none.',
+                        text, max_tokens=400, model=model)
+        items = json.loads(out or "[]")
     except Exception:
         return []
-    out = []
-    for it in items:
-        i = text.find(it.get("value", ""))
+    found = []
+    for it in items if isinstance(items, list) else []:
+        v = it.get("value", "") if isinstance(it, dict) else ""
+        i = text.find(v) if v else -1
         if i >= 0 and it.get("kind") in ("name", "address"):
-            out.append(PIIField(it["kind"], it["value"], i, i + len(it["value"]), "support", DEFAULT_RETENTION[it["kind"]]))
-    return out
+            found.append(PIIField(it["kind"], v, i, i + len(v), "support", DEFAULT_RETENTION[it["kind"]]))
+    return found

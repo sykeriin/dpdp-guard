@@ -12,7 +12,7 @@ wait_for() { for _ in $(seq 1 40); do curl -sf "$1" >/dev/null && return 0; slee
 
 step "sdk-python tests"   bash -c "cd sdk-python && python -m pytest -q tests"
 step "server tests"       bash -c "cd server && PYTHONPATH=. python -m pytest -q tests 2>&1 | grep -vE \"couldn't stop|hint: you can try\""
-step "kill-rule tracker"  python -m pytest -q scripts/test_killrule.py
+step "scripts tests (kill-rule, llm-eval harness)" python -m pytest -q scripts/test_killrule.py scripts/test_eval_llm.py
 step "example tests"      bash -c "PYTHONPATH=sdk-python python -m pytest -q examples/tests"
 
 step "api start"       ./run_server.sh

@@ -149,14 +149,22 @@ def test_review_ticket_never_contains_raw_pii(g):
     g("my data is 9876543210, sort it out somehow", "u1")
     assert "9876543210" not in g.store.rights("t1")[0]["detail"]
 
+class _Block:
+    def __init__(self, type, text=None):
+        self.type = type
+        if text is not None: self.text = text          # thinking blocks have no .text, like the real SDK's ThinkingBlock
+
 class _FakeLLM:
-    def __init__(self, text): self.text, self.calls = text, 0
+    """Mimics claude-haiku-5-5: by default a response STARTS with a thinking block (unless thinking was disabled in the request)."""
+    def __init__(self, text, stop_reason="end_turn"): self.text, self.stop_reason, self.calls, self.kw = text, stop_reason, 0, []
     @property
     def messages(self): return self
     def create(self, **kw):
-        self.calls += 1
+        self.calls += 1; self.kw.append(kw)
         class R: pass
-        r = R(); r.content = [type("C", (), {"text": self.text})()]; return r
+        r = R(); r.stop_reason = self.stop_reason
+        r.content = [_Block("text", self.text)] if kw.get("thinking", {}).get("type") == "disabled" else [_Block("thinking"), _Block("text", self.text)]
+        return r
 
 def test_llm_fallback_used_only_when_rules_miss():
     from dpdp_guard import intent
@@ -178,3 +186,49 @@ def test_guard_with_llm_catches_rules_miss_and_queues_erasure():
     g("hi", "u1"); g("1", "u1")
     r = g("could you purge whatever you've stored on me", "u1")
     assert r.intent == "erasure" and r.action == "reply" and r.review_ref is None
+
+
+def test_llm_request_disables_thinking_and_reads_text_block_not_first_block():
+    from dpdp_guard import intent
+    llm = _FakeLLM("erasure")
+    assert intent.classify_llm("odd text", client=llm) == "erasure"
+    kw = llm.kw[0]
+    assert kw["model"] == "claude-haiku-5-5" and kw["thinking"] == {"type": "disabled"} and kw["output_config"] == {"effort": "low"}
+    assert "temperature" not in kw and "prefill" not in str(kw["messages"])         # params rejected by this model family
+
+def test_llm_survives_a_leading_thinking_block_if_thinking_were_on():
+    from dpdp_guard._llm import call_text
+    class ThinkFirst(_FakeLLM):
+        def create(self, **kw):
+            r = super().create(**{**kw, "thinking": {"type": "adaptive"}}); return r     # force the thinking-first shape
+    assert call_text(ThinkFirst("access"), "s", "u") == "access"                          # old content[0].text code would have crashed here
+
+def test_llm_refusal_or_truncation_means_no_intent():
+    from dpdp_guard import intent
+    assert intent.classify_llm("x", client=_FakeLLM("erasure", stop_reason="refusal")) is None
+    assert intent.classify_llm("x", client=_FakeLLM("erasure", stop_reason="max_tokens")) is None
+
+def test_llm_names_extraction_plumbing():
+    from dpdp_guard import pii
+    llm = _FakeLLM('[{"kind":"name","value":"Priya Sharma"},{"kind":"address","value":"12 MG Road"},{"kind":"name","value":"NOT IN TEXT"}]')
+    got = pii.llm_names("I am Priya Sharma, 12 MG Road", client=llm)
+    assert [(f.kind, f.value) for f in got] == [("name", "Priya Sharma"), ("address", "12 MG Road")]
+    assert pii.llm_names("x", client=_FakeLLM("not json")) == []
+
+
+def test_real_sdk_accepts_and_serialises_the_request_offline():
+    """Uses the REAL anthropic client against a mock transport: proves the kwargs are valid for the installed SDK and what goes on the wire."""
+    import json, pytest
+    anthropic = pytest.importorskip("anthropic")
+    httpx = pytest.importorskip("httpx2")        # the SDK's own HTTP layer in this major version
+    seen = {}
+    def handler(req):
+        seen["body"] = json.loads(req.content); seen["path"] = req.url.path
+        return httpx.Response(200, json={"id": "msg_1", "type": "message", "role": "assistant", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "stop_sequence": None,
+                                         "content": [{"type": "text", "text": "erasure"}], "usage": {"input_tokens": 5, "output_tokens": 2}})
+    client = anthropic.Anthropic(api_key="test", http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+    from dpdp_guard import intent
+    assert intent.classify_llm("purge whatever you hold on me", client=client) == "erasure"
+    b = seen["body"]
+    assert seen["path"] == "/v1/messages" and b["model"] == "claude-haiku-5-5" and b["thinking"] == {"type": "disabled"} and b["output_config"] == {"effort": "low"}
+    assert b["messages"] == [{"role": "user", "content": "purge whatever you hold on me"}] and "temperature" not in b

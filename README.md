@@ -13,7 +13,9 @@ Compliance layer for chatbots and AI agents under India's DPDP Act / Rules 2025.
 | `sdk-node/` | thin client for `/v1/guard` (n8n, Node webhooks) |
 | `examples/` | WhatsApp Cloud webhook, LangGraph wrapper, `e2e_demo.py` |
 | `docs/` | `deploy.md` (hosting checklist, nothing deployed), `dpdp-mapping.md` (rule -> feature), `intent-eval.md` (measured accuracy), `validation-kit.md` (interview script, outreach, kill rule) |
-| `scripts/` | `test_all.sh`, `setup_db.sh`, `dashboard_e2e.js`, `killrule.py` (interview kill-rule tracker over `docs/interviews.csv`) |
+| `scripts/` | `test_all.sh`, `setup_db.sh`, `dashboard_e2e.js`, `killrule.py` (interview kill-rule tracker over `docs/interviews.csv`), `eval_llm_intent.py` (LLM accuracy harness; needs an API key) |
+| `deploy/` | `docker-compose.prod.yml` + `Caddyfile` + `.env.example`: production template, validated with `docker compose config` only, never run |
+| `docs/outreach/` | LinkedIn post drafts, prospecting plan, free-audit teardown template (nothing posted or sent) |
 | `dashboard/app/welcome` | public landing page + consent-gated waitlist (delete link, 365-day retention) |
 
 ## Quick start (local, no server)
@@ -40,7 +42,7 @@ One command runs everything (real Postgres, live API, built dashboard, headless 
 ./scripts/setup_db.sh        # once, as a Postgres superuser (dev credentials)
 ./scripts/test_all.sh
 ```
-Individual suites: `cd sdk-python && python -m pytest` (32) | `cd server && PYTHONPATH=. python -m pytest tests` (28) | `PYTHONPATH=sdk-python python -m pytest examples/tests` (5) | `cd sdk-node && node test.mjs` | `python examples/e2e_demo.py` | `node scripts/dashboard_e2e.js`.
+Individual suites: `cd sdk-python && python -m pytest` (45) | `cd server && PYTHONPATH=. python -m pytest tests` (28) | `PYTHONPATH=sdk-python python -m pytest examples/tests` (7) | `cd sdk-node && node test.mjs` | `python examples/e2e_demo.py` | `node scripts/dashboard_e2e.js`.
 
 ## Configuration
 | Variable | Where | Purpose |
@@ -58,14 +60,16 @@ Per-tenant purposes, retention and business name: `PUT /v1/config` (see `server/
 ## Status: what is and isn't verified
 **Verified by `scripts/test_all.sh`:** per-purpose consent (a bare "yes" is rejected), PII masking, hash-chain + tamper detection (including owner-level edits), RLS tenant isolation as a non-superuser role, erasure via built-in transcripts + SQL connector + signed webhook, purpose-scoped erasure (withdrawing marketing leaves order-update data alone, including after a failed retry), retention expiry, fail-closed guard when the ledger is down, WhatsApp webhook signature check and duplicate-delivery handling, guardian-consent flow, breach kit, audit-pack ZIP, tenant-configurable purposes, the dashboard in a real browser (httpOnly cookie session; key never reachable from page JS; connectors, lookup, notices, checker, audit download), Node SDK.
 
-**Intent classifier: measure, don't trust.** Rules-only accuracy on phrasings written after the rules was **73.9%** (0 false positives, 69 cases); the first fresh set scored **58.9%** before I tuned on it. Details and caveats in `docs/intent-eval.md`. Misses open a human-review ticket when the message mentions data/deletion/consent (catches 11 of 18; 7 of 41 rights requests still pass silently). The LLM fallback (`use_llm=True`) is implemented and its wiring is unit-tested with a fake client, but it **has never been run against a real model**, so its accuracy is unknown.
+**Intent classifier: measure, don't trust.** Rules-only accuracy on phrasings written after the rules was **73.9%** (0 false positives, 69 cases); the first fresh set scored **58.9%** before I tuned on it. Details and caveats in `docs/intent-eval.md`. Misses open a human-review ticket when the message mentions data/deletion/consent (catches 11 of 18; 7 of 41 rights requests still pass silently). The LLM fallback (`use_llm=True`) **has never been run against a real model**, so its accuracy is unknown (run `scripts/eval_llm_intent.py` with a key). Its request is unit-tested against a fake client and serialised through the real SDK on a mock transport. An earlier version would have failed silently on every call (it read `content[0].text` but this model family can start with a thinking block): fixed. With `use_llm=True` nearly every ordinary message triggers a model call and sends its raw text to the provider; see `docs/intent-eval.md`.
 
 **Not verified / not built**
 - HubSpot, Zoho, Pinecone and Google Sheets connectors are written from API docs and tested only against mocked HTTP (Sheets) or not at all. The `pgvector` connector is a plain `DELETE ... WHERE principal=`, tested on an ordinary table. Only the webhook connector honours single-purpose scope; the others are skipped for purpose-scoped jobs rather than over-deleting.
 - Docker images are not built or tested (no daemon in the dev environment).
 - **Guardian consent is self-asserted**: the child types a number and whoever replies from it is treated as the guardian. There is no identity or relationship verification (no DigiLocker etc.). The child learns the outcome on their next message. The guardian invite is a business-initiated message and outside the 24h window needs an approved WhatsApp template. Needs legal review before anyone relies on it for under-18s.
 - The waitlist stores emails in plaintext (needed to contact people) and nothing sends email yet; the waitlist notice is a draft for lawyer review.
-- Voice channel, Consent Manager integration, billing, multi-user accounts: not built.
+- **Voice adapter** (`dpdp_guard/voice.py`, `examples/voice_webhook`): spoken/keypad per-purpose consent, tested with simulated input only. Not tested with any telephony provider or ASR. Call recordings are personal data and are not handled. Guardian flow is text-only.
+- `deploy/` files have never been run; no Terraform provided (couldn't be validated without a cloud account).
+- Consent Manager integration, billing, multi-user accounts: not built.
 - Erasure from external stores needs the customer to tag records with the principal hash (`guard.pid(user_id)`) or use the webhook connector: the server holds only hashes by design.
 - Events are append-only, so never put raw PII in event payloads. Don't run `/v1/principals/lookup` or the audit pack from an untrusted network: the dashboard session is one API key per tenant.
 - Webhook de-duplication and the checker rate limit are in-memory: use Redis/DB if you run more than one process.

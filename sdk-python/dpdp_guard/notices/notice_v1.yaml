@@ -76,4 +76,16 @@ templates:
   guardian_recorded:
     en: "Thank you. Your decision is recorded: {granted}. You can withdraw it anytime by messaging us."
     hi: "धन्यवाद। आपका निर्णय दर्ज हो गया: {granted}। आप कभी भी संदेश भेजकर इसे वापस ले सकते हैं।"
+  voice_intro:
+    en: "Hello, this is {business}. Before we continue we need your permission to use some of your personal data. For each question, press 1 or say yes to agree, or press 2 or say no to decline. You can say stop or delete my data at any time."
+    hi: "नमस्ते, यह {business} है। आगे बढ़ने से पहले हमें आपका कुछ व्यक्तिगत डेटा इस्तेमाल करने की अनुमति चाहिए। हर सवाल पर सहमति के लिए 1 दबाएं या हाँ कहें, मना करने के लिए 2 दबाएं या नहीं कहें। आप कभी भी स्टॉप या मेरा डेटा हटाओ कह सकते हैं।"
+  voice_ask:
+    en: "{purpose} Press 1 or say yes to agree. Press 2 or say no to decline."
+    hi: "{purpose} सहमति के लिए 1 दबाएं या हाँ कहें। मना करने के लिए 2 दबाएं या नहीं कहें।"
+  voice_repeat:
+    en: "Sorry, I didn't catch that."
+    hi: "माफ़ कीजिए, मैं समझ नहीं पाया।"
+  voice_done:
+    en: "Thank you. Your choices are saved. How can I help you?"
+    hi: "धन्यवाद। आपकी पसंद दर्ज हो गई है। मैं आपकी क्या मदद कर सकता हूँ?"
 

@@ -109,22 +109,19 @@ def classify_rules(text: str) -> str | None:
 
 
 def classify_llm(text: str, client=None, model: str = "claude-haiku-5-5") -> str | None:
+    from ._llm import call_text, make_client
+    client = client or make_client()
     if client is None:
-        try:
-            import anthropic
-            client = anthropic.Anthropic()
-        except Exception:
-            return None
+        return None
     try:
-        r = client.messages.create(
-            model=model, max_tokens=10,
-            system=("Classify a chat message sent to a business bot (English, Hindi or Hinglish) into one data-rights intent: "
-                    "erasure (delete my data), withdraw (withdraw consent), access (what data do you have), correction (fix my details), "
-                    "grievance (privacy complaint), stop (stop messaging me), none. Reply with one word only."),
-            messages=[{"role": "user", "content": text}])
-        out = r.content[0].text.strip().lower()
+        out = call_text(client, (
+            "Classify a chat message sent to a business bot (English, Hindi or Hinglish) into one data-rights intent: "
+            "erasure (delete my data), withdraw (withdraw consent), access (what data do you have), correction (fix my stored details), "
+            "grievance (privacy complaint), stop (stop messaging me), none. Ordinary service requests about an order, delivery, "
+            "booking or product are none. Reply with one word only."), text, max_tokens=16, model=model)
     except Exception:
         return None
+    out = (out or "").strip().lower()
     return out if out in INTENTS else None
 
 

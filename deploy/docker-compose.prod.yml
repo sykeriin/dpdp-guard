@@ -1,0 +1,31 @@
+# PRODUCTION TEMPLATE. Never deployed or run by the author: validated only with `docker compose config`.
+# Needs: an Indian-region VM, DNS for both domains pointing at it, and a .env file (see deploy/.env.example).
+# Use a managed Postgres in the same region rather than the `db` service if you can; keep `db` only for small pilots.
+services:
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    environment: { DASHBOARD_DOMAIN: "${DASHBOARD_DOMAIN:?set DASHBOARD_DOMAIN}", API_DOMAIN: "${API_DOMAIN:?set API_DOMAIN}" }
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data", "caddy_config:/config"]
+    depends_on: [api, dashboard]
+    restart: unless-stopped
+  api:
+    build: { context: .., dockerfile: server/Dockerfile }
+    command: ["sh", "-c", "python -c 'from app import db; db.init_schema()' && uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"]
+    environment:
+      ADMIN_DATABASE_URL: "${ADMIN_DATABASE_URL:?owner role url}"
+      DATABASE_URL: "${DATABASE_URL:?non-superuser app role url, never the owner}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:?long random string}"
+      CORS_ORIGINS: "https://${DASHBOARD_DOMAIN}"
+      RUN_WORKERS: "1"                 # exactly ONE api replica runs the loop; keep replicas at 1 (rate limits and dedupe are per process)
+    expose: ["8000"]
+    restart: unless-stopped
+  dashboard:
+    build: { context: .., dockerfile: dashboard/Dockerfile }
+    environment:
+      GUARD_API_URL: http://api:8000   # internal network only; the browser talks to the dashboard's same-origin proxy, not the API
+      # INSECURE_COOKIES must stay UNSET: the session cookie is Secure and HttpOnly behind HTTPS
+    expose: ["3000"]
+    depends_on: [api]
+    restart: unless-stopped
+volumes: { caddy_data: {}, caddy_config: {} }

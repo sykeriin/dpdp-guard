@@ -1,0 +1,13 @@
+# TLS terminator for production. Replace the domains. Caddy gets and renews certificates automatically.
+{$DASHBOARD_DOMAIN} {
+	reverse_proxy dashboard:3000
+}
+
+{$API_DOMAIN} {
+	# The admin API (tenant creation, waitlist listing) is never reachable from the public internet.
+	# Reach it by SSH tunnel / VPN to the api container on :8000 instead.
+	@admin path /admin/*
+	respond @admin 404
+
+	reverse_proxy api:8000
+}
