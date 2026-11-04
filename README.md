@@ -12,8 +12,9 @@ Compliance layer for chatbots and AI agents under India's DPDP Act / Rules 2025.
 | `dashboard/` | Next.js: login (httpOnly cookie via same-origin proxy), consents, rights queue, erasure, connectors, principal lookup, notices, breach kit, audit pack, public bot checker |
 | `sdk-node/` | thin client for `/v1/guard` (n8n, Node webhooks) |
 | `examples/` | WhatsApp Cloud webhook, LangGraph wrapper, `e2e_demo.py` |
-| `docs/` | `dpdp-mapping.md` (rule -> feature), `intent-eval.md` (measured accuracy), `validation-kit.md` (interview script, outreach, kill rule) |
-| `scripts/` | `test_all.sh`, `setup_db.sh`, `dashboard_e2e.js` |
+| `docs/` | `deploy.md` (hosting checklist, nothing deployed), `dpdp-mapping.md` (rule -> feature), `intent-eval.md` (measured accuracy), `validation-kit.md` (interview script, outreach, kill rule) |
+| `scripts/` | `test_all.sh`, `setup_db.sh`, `dashboard_e2e.js`, `killrule.py` (interview kill-rule tracker over `docs/interviews.csv`) |
+| `dashboard/app/welcome` | public landing page + consent-gated waitlist (delete link, 365-day retention) |
 
 ## Quick start (local, no server)
 ```python
@@ -39,7 +40,7 @@ One command runs everything (real Postgres, live API, built dashboard, headless 
 ./scripts/setup_db.sh        # once, as a Postgres superuser (dev credentials)
 ./scripts/test_all.sh
 ```
-Individual suites: `cd sdk-python && python -m pytest` (32) | `cd server && PYTHONPATH=. python -m pytest tests` (24) | `PYTHONPATH=sdk-python python -m pytest examples/tests` (5) | `cd sdk-node && node test.mjs` | `python examples/e2e_demo.py` | `node scripts/dashboard_e2e.js`.
+Individual suites: `cd sdk-python && python -m pytest` (32) | `cd server && PYTHONPATH=. python -m pytest tests` (28) | `PYTHONPATH=sdk-python python -m pytest examples/tests` (5) | `cd sdk-node && node test.mjs` | `python examples/e2e_demo.py` | `node scripts/dashboard_e2e.js`.
 
 ## Configuration
 | Variable | Where | Purpose |
@@ -63,6 +64,7 @@ Per-tenant purposes, retention and business name: `PUT /v1/config` (see `server/
 - HubSpot, Zoho, Pinecone and Google Sheets connectors are written from API docs and tested only against mocked HTTP (Sheets) or not at all. The `pgvector` connector is a plain `DELETE ... WHERE principal=`, tested on an ordinary table. Only the webhook connector honours single-purpose scope; the others are skipped for purpose-scoped jobs rather than over-deleting.
 - Docker images are not built or tested (no daemon in the dev environment).
 - **Guardian consent is self-asserted**: the child types a number and whoever replies from it is treated as the guardian. There is no identity or relationship verification (no DigiLocker etc.). The child learns the outcome on their next message. The guardian invite is a business-initiated message and outside the 24h window needs an approved WhatsApp template. Needs legal review before anyone relies on it for under-18s.
+- The waitlist stores emails in plaintext (needed to contact people) and nothing sends email yet; the waitlist notice is a draft for lawyer review.
 - Voice channel, Consent Manager integration, billing, multi-user accounts: not built.
 - Erasure from external stores needs the customer to tag records with the principal hash (`guard.pid(user_id)`) or use the webhook connector: the server holds only hashes by design.
 - Events are append-only, so never put raw PII in event payloads. Don't run `/v1/principals/lookup` or the audit pack from an untrusted network: the dashboard session is one API key per tenant.

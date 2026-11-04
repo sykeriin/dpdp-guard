@@ -65,6 +65,23 @@ const j = (path, key, method = "GET", body) => fetch(API + path, { method, heade
   await p.goto(DASH + "/"); await p.waitForSelector("text=Logged in"); await p.click("text=Log out"); await p.waitForSelector("input[type=password]");
   await p.goto(DASH + "/rights"); await p.waitForTimeout(800); assert.match(await text(), /Not logged in/);
 
+  // 8b. public landing page: no dashboard nav, consent gating, per-purpose storage, delete link works
+  const pub = await b.newContext(); const q = await pub.newPage();
+  await q.goto(DASH + "/welcome"); await q.waitForTimeout(800);
+  assert.equal(await q.locator("nav").count(), 0, "public page must not show dashboard nav");
+  const em = `lead_${id}@example.com`;
+  await q.fill("input[type=email]", em);
+  assert.equal(await q.locator("button:has-text('Join waitlist')").isDisabled(), true, "cannot join without the required consent");
+  await q.check("text=Also send me occasional"); assert.equal(await q.locator("button:has-text('Join waitlist')").isDisabled(), true, "optional consent alone is not enough");
+  await q.check("text=Contact me about DPDP Guard"); await q.click("button:has-text('Join waitlist')"); await q.waitForSelector("text=You're on the list");
+  const body = await q.innerText("body"); assert.match(body, /launch_contact, tips/); assert.match(body, /365 days/);
+  if (shots) await q.screenshot({ path: `${shots}/welcome.png`, fullPage: true });
+  const wl = await (await fetch(API + "/admin/waitlist", { headers: { "X-Admin-Token": ADMIN } })).json(); assert.ok(wl.some((r) => r.email === em), "signup stored");
+  const link = await q.locator("a[href*='delete=']").first().getAttribute("href");
+  await q.goto(DASH + link); await q.click("text=Yes, delete it"); await q.waitForSelector("text=your signup was deleted");
+  const wl2 = await (await fetch(API + "/admin/waitlist", { headers: { "X-Admin-Token": ADMIN } })).json(); assert.ok(!wl2.some((r) => r.email === em), "signup erased via delete link");
+  await pub.close();
+
   // 9. cross-origin state change is refused by the proxy
   const bad = await fetch(DASH + "/api/guard/v1/connectors", { method: "POST", headers: { "Content-Type": "application/json", Origin: "http://evil.example" }, body: "{}" });
   assert.equal(bad.status, 403);

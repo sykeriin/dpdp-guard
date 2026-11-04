@@ -23,6 +23,9 @@ create table if not exists erasure_jobs(id bigserial primary key, tenant_id text
   rights_ref text, status text not null default 'queued', attempts int default 0, run_after timestamptz default now(),
   created_at timestamptz default now(), finished_at timestamptz, results jsonb default '[]');
 alter table erasure_jobs add column if not exists scope text not null default 'all';
+-- platform-level (not per-tenant): people who asked to be contacted about DPDP Guard itself. No RLS: only admin endpoints list it.
+create table if not exists waitlist(id bigserial primary key, email text not null unique, purposes text[] not null, notice_version text not null,
+  token_hash text not null, created_at timestamptz not null default now(), expires_at timestamptz not null);
 create table if not exists connectors(id bigserial primary key, tenant_id text not null, kind text not null, name text, config jsonb default '{}');
 create table if not exists breaches(id bigserial primary key, tenant_id text not null, title text, description text,
   detected_at timestamptz not null default now(), affected_principals text[] default '{}', data_kinds text[] default '{}',

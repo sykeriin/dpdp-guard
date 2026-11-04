@@ -25,6 +25,7 @@ async def lifespan(app):
                 for t in ids:
                     await asyncio.to_thread(workers.run_retention, t)
                     await asyncio.to_thread(workers.run_erasure, t)
+                await asyncio.to_thread(purge_waitlist)
                 await asyncio.sleep(30)
         task = asyncio.create_task(loop())
     yield
@@ -65,6 +66,10 @@ class ConfigIn(BaseModel):
     business: str = "Your Business"; privacy_url: str = "https://example.com/privacy"
     required_purposes: list[str] = ["order_updates"]; optional_purposes: list[str] = []
     purposes: dict[str, PurposeIn] = {}          # custom purposes; built-ins (order_updates, support, marketing) need no definition
+class WaitlistIn(BaseModel):
+    email: str
+    consent_contact: bool = False          # required: contact me about DPDP Guard pilots/launch
+    consent_tips: bool = False             # optional, separate: occasional compliance tips
 class CheckIn(BaseModel):
     text: str
 class TenantIn(BaseModel):
@@ -360,3 +365,46 @@ def guard_endpoint(b: GuardIn, t=T):
     r = g(b.message, b.user_id, b.channel)
     return {"action": r.action, "message": r.message, "masked_message": r.masked_message, "reply_text": r.reply_text,
             "intent": r.intent, "granted": r.granted, "rights_ref": r.rights_ref, "review_ref": r.review_ref, "notify": r.notify, "principal": g.pid(b.user_id)}
+
+
+WAITLIST_NOTICE_VERSION = "waitlist-v1-draft"   # draft: needs lawyer review like every notice here
+WAITLIST_RETENTION_DAYS = 365
+
+
+@app.post("/v1/waitlist")
+def join_waitlist(b: WaitlistIn, request: Request):
+    """Public. We apply the rules we sell: explicit per-purpose opt-in, stated retention, a delete link (the returned token)."""
+    import re, secrets, hashlib
+    _rate_limit("wl:" + (request.client.host if request.client else "?"), int(os.environ.get("WAITLIST_RATE_PER_MIN", "10")))
+    email = b.email.strip().lower()
+    if len(email) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email): raise HTTPException(422, "invalid email")
+    if not b.consent_contact: raise HTTPException(422, "consent to be contacted is required to join the waitlist")
+    purposes = ["launch_contact"] + (["tips"] if b.consent_tips else [])
+    token = secrets.token_urlsafe(24)
+    with db.raw_cur(db.ADMIN_URL) as cur:
+        cur.execute("""insert into waitlist(email,purposes,notice_version,token_hash,expires_at) values(%s,%s,%s,%s, now() + make_interval(days => %s))
+                       on conflict(email) do update set purposes=excluded.purposes, notice_version=excluded.notice_version, token_hash=excluded.token_hash,
+                       expires_at=excluded.expires_at""",
+                    (email, purposes, WAITLIST_NOTICE_VERSION, hashlib.sha256(token.encode()).hexdigest(), WAITLIST_RETENTION_DAYS))
+    return {"ok": True, "purposes": purposes, "retention_days": WAITLIST_RETENTION_DAYS, "delete_token": token}
+
+
+@app.delete("/v1/waitlist")
+def leave_waitlist(token: str):
+    import hashlib
+    with db.raw_cur(db.ADMIN_URL) as cur:
+        cur.execute("delete from waitlist where token_hash=%s", (hashlib.sha256(token.encode()).hexdigest(),))
+        if cur.rowcount != 1: raise HTTPException(404, "unknown or already used token")
+    return {"ok": True}
+
+
+@app.get("/admin/waitlist", dependencies=[Depends(auth.require_admin)])
+def admin_waitlist():
+    with db.raw_cur(db.ADMIN_URL) as cur:
+        cur.execute("select email, purposes, created_at, expires_at from waitlist order by id"); return cur.fetchall()
+
+
+def purge_waitlist() -> int:
+    """Retention: delete expired signups. Called by the worker loop and tests."""
+    with db.raw_cur(db.ADMIN_URL) as cur:
+        cur.execute("delete from waitlist where expires_at < now()"); return cur.rowcount

@@ -1,0 +1,2 @@
+date,name,role,stack,num_bots,would_pay,price_inr_month,competitor_named,loi,pilot,notes
+2026-11-04,Example Person,agency,n8n;WhatsApp Cloud API,12,Y,3000,Periskope;Perfios,N,N,"EXAMPLE ROW - delete me. would_pay is Y / N / MAYBE; only Y counts toward the kill rule"

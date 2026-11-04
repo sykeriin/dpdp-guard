@@ -282,3 +282,51 @@ def test_notices_endpoint_includes_custom_purposes(tenant):
     c.put("/v1/config", json={"required_purposes": ["appointments"], "purposes": {"appointments": {"en": "Appts", "retention_days": 30}}})
     n = c.get("/v1/notices").json()
     assert "appointments" in n["purposes"] and "marketing" in n["purposes"] and "DRAFT" in n["status"]
+
+
+# ---- public waitlist (applies the product's own rules)
+def _wl(c, **kw):
+    return c.post("/v1/waitlist", json={"email": f"{kw.pop('n', 'a')}@example.com", **kw})
+
+def test_waitlist_requires_explicit_consent_and_valid_email(tenant):
+    from app import main
+    _, c = tenant; main._hits.clear()
+    assert _wl(c, n="x1").status_code == 422                                   # no consent -> nothing stored
+    assert _wl(c, n="x1", consent_tips=True).status_code == 422                # optional consent alone is not enough
+    assert c.post("/v1/waitlist", json={"email": "not-an-email", "consent_contact": True}).status_code == 422
+    with db.raw_cur(db.ADMIN_URL) as cur:
+        cur.execute("select count(*) n from waitlist where email like 'x1@%'"); assert cur.fetchone()["n"] == 0
+
+def test_waitlist_purposes_separate_retention_and_delete_token(tenant):
+    from app import main
+    _, c = tenant; main._hits.clear()
+    r = _wl(c, n="w1", consent_contact=True).json()
+    assert r["purposes"] == ["launch_contact"] and r["retention_days"] == 365          # tips NOT implied
+    r2 = _wl(c, n="w2", consent_contact=True, consent_tips=True).json()
+    assert r2["purposes"] == ["launch_contact", "tips"]
+    with db.raw_cur(db.ADMIN_URL) as cur:
+        cur.execute("select (expires_at > now() + interval '364 days') as ok, token_hash <> %s as hashed from waitlist where email='w1@example.com'", (r["delete_token"],))
+        row = cur.fetchone(); assert row["ok"] and row["hashed"]                       # expiry set; raw token not stored
+    assert c.delete("/v1/waitlist", params={"token": "wrong"}).status_code == 404
+    assert c.delete("/v1/waitlist", params={"token": r["delete_token"]}).status_code == 200
+    assert c.delete("/v1/waitlist", params={"token": r["delete_token"]}).status_code == 404   # single use
+    with db.raw_cur(db.ADMIN_URL) as cur:
+        cur.execute("select count(*) n from waitlist where email='w1@example.com'"); assert cur.fetchone()["n"] == 0
+
+def test_waitlist_retention_purge_and_admin_only_listing(tenant):
+    from app import main
+    _, c = tenant; main._hits.clear()
+    _wl(c, n="old1", consent_contact=True)
+    with db.raw_cur(db.ADMIN_URL) as cur:
+        cur.execute("update waitlist set expires_at = now() - interval '1 day' where email='old1@example.com'")
+    assert main.purge_waitlist() >= 1
+    with db.raw_cur(db.ADMIN_URL) as cur:
+        cur.execute("select count(*) n from waitlist where email='old1@example.com'"); assert cur.fetchone()["n"] == 0
+    assert c.get("/admin/waitlist").status_code == 403                                 # tenant key is not admin
+    assert c.get("/admin/waitlist", headers={"X-Admin-Token": "adm"}).status_code == 200
+
+def test_waitlist_rate_limited(tenant, monkeypatch):
+    from app import main
+    _, c = tenant; main._hits.clear(); monkeypatch.setenv("WAITLIST_RATE_PER_MIN", "2")
+    codes = [_wl(c, n=f"r{i}", consent_contact=True).status_code for i in range(4)]
+    assert codes == [200, 200, 429, 429]; main._hits.clear()
