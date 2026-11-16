@@ -59,7 +59,16 @@ def evaluate(rows, client, model="claude-haiku-5-5"):
 def main(argv):
     ap = argparse.ArgumentParser(); ap.add_argument("tsv", nargs="?", default=str(ROOT / "sdk-python/tests/intent_heldout2.tsv"))
     ap.add_argument("--model", default="claude-haiku-5-5"); ap.add_argument("--out")
+    ap.add_argument("--local", metavar="BASE_URL", help="OpenAI-compatible endpoint, e.g. http://localhost:11434/v1 (Ollama); use with --model <local model>")
     a = ap.parse_args(argv)
+    if a.local:
+        from dpdp_guard._llm import LocalClient
+        res = evaluate(load(a.tsv), LocalClient(a.local, a.model), a.model)
+        res["cost_usd"] = 0.0
+        res["file"] = pathlib.Path(a.tsv).name
+        print(json.dumps(res, indent=2, ensure_ascii=False))
+        if a.out: pathlib.Path(a.out).write_text(json.dumps(res, indent=2, ensure_ascii=False), encoding="utf-8")
+        return 0
     if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
         print("No ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN set. Not running: this script never fabricates a result.\n"
               "Add the key as a secret in the environment settings, start a new session, and rerun.", file=sys.stderr)

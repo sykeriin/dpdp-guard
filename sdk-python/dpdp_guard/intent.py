@@ -121,7 +121,7 @@ def classify_llm(text: str, client=None, model: str = "claude-haiku-5-5") -> str
             "booking or product are none. Reply with one word only."), text, max_tokens=16, model=model)
     except Exception:
         return None
-    out = (out or "").strip().lower()
+    out = (out or "").strip().strip(".,!:;\"'`").lower()      # small local models add punctuation
     return out if out in INTENTS else None
 
 
